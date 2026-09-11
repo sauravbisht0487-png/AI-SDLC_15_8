@@ -19,7 +19,7 @@ import authRoutes from "./routes/authRoutes";
 import organizationRoutes from "./routes/organizationRoutes";
 
 app.use(cors({
-  origin: "http://localhost:5173", // my Vite dev server
+  origin: ["http://localhost:5173", "https://ai-sdlc-frontend-one.vercel.app"],
   credentials: true,
 }));
 
