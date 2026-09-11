@@ -13,6 +13,13 @@ export const getProjectsForOrg = async (organizationId: string) => {
   return projectRepository.findByOrganization(organizationId);
 };
 
+export const updateProject = async (id: string, updates: { name?: string; description?: string }) => {
+  return projectRepository.updateById(id, updates);
+};
+
+export const deleteProject = async (id: string) => {
+  return projectRepository.deleteById(id);
+};
 
 export const createGithubRepoForProject = async (projectId: string, projectName: string) => {
   // sanitize project name into a valid repo name: lowercase, spaces->hyphens, strip invalid chars

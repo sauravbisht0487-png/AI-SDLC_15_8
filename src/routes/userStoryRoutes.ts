@@ -7,8 +7,7 @@ import {
   updateUserStory,
   deleteUserStory,
   pushToGithub,
-
-  // generateCode,
+  generateCode,
 } from "../controllers/userStoryController";
 
 const router = Router({ mergeParams: true });
@@ -29,6 +28,11 @@ router.delete(
 );
 router.post("/push-to-github", authenticate, checkRequirementAccess, pushToGithub);
 
-// router.post("/:userStoryId/generate-code", authenticate,checkRequirementAccess,generateCode);
+router.post(
+  "/:userStoryId/generate-code",
+  authenticate,
+  checkRequirementAccess,
+  generateCode,
+);
 
 export default router;

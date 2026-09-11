@@ -124,32 +124,47 @@ export const generateCode = async (
   res: Response,
 ) => {
   try {
-    const { userStoryId } = req.params;
+    const { userStoryId, requirementId } = req.params;
     const userId = req.userId!;
 
-    // fetch the story itself — checkRequirementAccess verifies the requirement, not this specific story
-    const stories = await userStoryService.getUserStoriesForRequirement(
-      req.params.requirementId,
-    );
-    const story = stories.find((s) => s._id.toString() === userStoryId);
-
-    if (!story) {
+    // checkRequirementAccess already verified org -> project -> requirement ownership
+    // and attached req.project / req.requirement. We still need to confirm THIS
+    // userStoryId actually belongs to that requirement, not just that it exists.
+    const story = await userStoryService.getUserStoryById(userStoryId);
+    if (!story || story.requirement.toString() !== requirementId) {
       res.status(404).json({ message: "User story not found" });
       return;
     }
 
+    const project = req.project!;
+    const requirement = req.requirement!;
+
     const generated = await userStoryService.generateCodeForUserStory(
-      userStoryId,
-      story.title,
-      story.description,
-      story.acceptanceCriteria,
+      story,
+      { name: project.name, description: project.description },
+      { title: requirement.title, description: requirement.description },
       userId,
     );
 
     res.status(201).json(generated);
-  } catch (error) {
+  } catch (error: any) {
     console.error("generateCode error:", error);
-    res.status(500).json({ message: "Failed to generate code" });
+
+    switch (error?.code) {
+      case "AI_NOT_CONFIGURED":
+        res.status(500).json({ message: error.message });
+        return;
+      case "AI_RATE_LIMIT":
+        res.status(429).json({ message: error.message });
+        return;
+      case "AI_REQUEST_FAILED":
+      case "AI_EMPTY_RESPONSE":
+      case "AI_INVALID_SHAPE":
+        res.status(502).json({ message: error.message });
+        return;
+      default:
+        res.status(500).json({ message: "Failed to generate code" });
+    }
   }
 };
 

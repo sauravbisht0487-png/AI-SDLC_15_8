@@ -2,6 +2,8 @@ import * as userStoryRepository from "../repositories/userStoryRepository";
 
 import * as githubService from "./githubService";
 
+
+
 import * as generatedCodeRepository from "../repositories/generatedCodeRepository";
 import * as aiService from "./aiService";
 
@@ -21,6 +23,10 @@ export const createUserStory = async (
 export const getUserStoriesForRequirement = async (requirementId: string) => {
   return userStoryRepository.findByRequirement(requirementId);
 };
+
+export const getUserStoryById = async (id: string) => {
+  return userStoryRepository.findById(id);
+};
 export const updateUserStory = async (
   id: string,
   updates: { title?: string; description?: string; acceptanceCriteria?: string[] }
@@ -34,14 +40,19 @@ export const deleteUserStory = async (id: string) => {
 
 
 export const generateCodeForUserStory = async (
-  storyId: string,
-  storyTitle: string,
-  storyDescription: string,
-  acceptanceCriteria: string[],
+  story: { _id: { toString(): string }; title: string; description: string; acceptanceCriteria: string[] },
+  project: { name: string; description?: string | undefined },
+  requirement: { title: string; description: string },
   createdBy: string
 ) => {
-  const files = await aiService.generateCodeForStory(storyTitle, storyDescription, acceptanceCriteria);
-  return generatedCodeRepository.create(storyId, files, createdBy);
+  const files = await aiService.generateCodeForStory(
+    story.title,
+    story.description,
+    story.acceptanceCriteria,
+    { name: project.name, description: project.description },
+    { title: requirement.title, description: requirement.description }
+  );
+  return generatedCodeRepository.create(story._id.toString(), files, createdBy);
 };
 export const pushGeneratedCodeToGithub = async (
   generatedCodeId: string,
@@ -63,3 +74,4 @@ export const pushGeneratedCodeToGithub = async (
 
   return generatedCode;
 };
+

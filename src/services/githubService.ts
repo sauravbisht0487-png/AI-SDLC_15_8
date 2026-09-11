@@ -1,4 +1,5 @@
 import { Octokit } from "@octokit/rest";
+import { backendPackageJson, frontendPackageJson } from "./repoTemplates";
 
 const getClient = (): Octokit => {
   const token = process.env.GITHUB_TOKEN;
@@ -19,6 +20,11 @@ export const createRepoForProject = async (
     auto_init: true, // creates an initial commit with a README, so the repo isn't empty
   });
 
+  // Seed the repo with both manifests immediately, so it's runnable
+  // from the moment it exists — not a separate step someone can forget.
+  await pushFileToRepo(response.data.name, "backend/package.json", backendPackageJson, "Add backend package.json");
+  await pushFileToRepo(response.data.name, "frontend/package.json", frontendPackageJson, "Add frontend package.json");
+
   return { repoName: response.data.name, repoUrl: response.data.html_url };
 };
 
@@ -34,10 +40,8 @@ export const pushFileToRepo = async (
     throw new Error("GITHUB_USERNAME is not configured");
   }
 
-  // GitHub's API requires file content to be base64-encoded
   const encodedContent = Buffer.from(content, "utf-8").toString("base64");
 
-  // Check if the file already exists — needed to get its current `sha` for updates
   let existingSha: string | undefined;
   try {
     const existing = await octokit.repos.getContent({ owner, repo: repoName, path: filePath });
@@ -45,7 +49,7 @@ export const pushFileToRepo = async (
       existingSha = existing.data.sha;
     }
   } catch (error: any) {
-    if (error.status !== 404) throw error; // 404 just means the file doesn't exist yet — fine
+    if (error.status !== 404) throw error;
   }
 
   await octokit.repos.createOrUpdateFileContents({
@@ -54,6 +58,6 @@ export const pushFileToRepo = async (
     path: filePath,
     message: commitMessage,
     content: encodedContent,
-    ...(existingSha ? { sha: existingSha } : {}), // required for updates
+    ...(existingSha ? { sha: existingSha } : {}),
   });
 };

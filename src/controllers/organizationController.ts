@@ -126,3 +126,41 @@ export const createGithubRepo = async (req: Request<OrgProjectParams>, res: Resp
     res.status(500).json({ message: "Failed to create GitHub repo" });
   }
 };
+export const updateProject = async (req: Request<OrgProjectParams>, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { name, description } = req.body;
+
+    const updates: { name?: string; description?: string } = {};
+    if (typeof name === "string" && name.trim()) updates.name = name.trim();
+    if (typeof description === "string") updates.description = description.trim();
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ message: "No valid fields provided to update" });
+      return;
+    }
+
+    const updated = await projectService.updateProject(projectId, updates);
+    if (!updated) {
+      res.status(404).json({ message: "Project not found" });
+      return;
+    }
+    res.status(200).json(updated);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update project" });
+  }
+};
+
+export const deleteProject = async (req: Request<OrgProjectParams>, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const deleted = await projectService.deleteProject(projectId);
+    if (!deleted) {
+      res.status(404).json({ message: "Project not found" });
+      return;
+    }
+    res.status(200).json({ message: "Project deleted", project: deleted });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete project" });
+  }
+};
