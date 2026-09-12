@@ -18,22 +18,26 @@ const PORT = Number(process.env.PORT) || 3000;
 import authRoutes from "./routes/authRoutes";
 import organizationRoutes from "./routes/organizationRoutes";
 
-
 const allowedOrigins = [
-  'http://localhost:5173',              // local dev
- 'https://ai-sdlc-frontend-one.vercel.app',   // your actual Vercel URL
+  'http://localhost:5173',
+  'https://ai-sdlc-frontend-one.vercel.app',
+  'https://ai-sdlc-frontend.vercel.app', // your real stable domain, once you confirm it
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+      return callback(null, true);
     }
+    // Allow any Vercel preview URL for this project during development
+    if (origin && /^https:\/\/ai-sdlc-frontend.*\.vercel\.app$/.test(origin)) {
+      return callback(null, true);
+    }
+    callback(null, false); // reject cleanly, no thrown error, no 500
   },
-  credentials: true, // needed if you're sending cookies/auth headers
+  credentials: true,
 }));
+
 
 app.use(express.json());
 app.use("/api/auth", authRoutes);
