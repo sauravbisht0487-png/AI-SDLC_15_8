@@ -160,6 +160,8 @@ Decide for yourself which files are actually needed to implement ONLY this user 
       },
     });
   } catch (err: any) {
+
+     console.error("RAW GEMINI ERROR:", err);
     
     if (err?.status === 429) {
       throw aiError(
