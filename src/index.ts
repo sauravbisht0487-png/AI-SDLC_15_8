@@ -18,9 +18,21 @@ const PORT = Number(process.env.PORT) || 3000;
 import authRoutes from "./routes/authRoutes";
 import organizationRoutes from "./routes/organizationRoutes";
 
+
+const allowedOrigins = [
+  'http://localhost:5173',              // local dev
+ 'https://ai-sdlc-frontend-one.vercel.app',   // your actual Vercel URL
+];
+
 app.use(cors({
-  origin: ["http://localhost:5173", "https://ai-sdlc-frontend-one.vercel.app"],
-  credentials: true,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // needed if you're sending cookies/auth headers
 }));
 
 app.use(express.json());
