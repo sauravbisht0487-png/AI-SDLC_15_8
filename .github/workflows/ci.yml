@@ -31,3 +31,12 @@ jobs:
 
       - name: Verify Docker image builds
         run: docker build -t ai-sdlc-backend-ci-test .
+
+  deploy:
+    needs: build-and-check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render deploy
+        run: curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
