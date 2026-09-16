@@ -11,7 +11,6 @@ const app = express();
 
 const PORT = Number(process.env.PORT) || 3000;
 
-
 import authRoutes from "./routes/authRoutes";
 import organizationRoutes from "./routes/organizationRoutes";
 
@@ -20,7 +19,7 @@ const allowedOrigins = [
   'https://ai-sdlc-frontend-one.vercel.app',
   'https://ai-sdlc-frontend.vercel.app', // your real stable domain, once you confirm it
 ];
-   const brokenVar: number = "this is a string";
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
