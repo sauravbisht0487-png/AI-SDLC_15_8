@@ -5,9 +5,7 @@ import Requirement from "../models/Requirement";
 import { verifyOrgOwnership } from "../utils/ownership";
 import * as projectRepository from "../repositories/projectRepository";
 import * as requirementRepository from "../repositories/requirementRepository";
-
-
-
+import logger from "../utils/logger";
 
 interface FullChainParams extends ParamsDictionary {
   orgId: string;
@@ -20,19 +18,17 @@ export const checkRequirementAccess = async (
   res: Response,
   next: NextFunction
 ) => {
+  const { orgId, projectId, requirementId } = req.params;
   try {
-    const { orgId, projectId, requirementId } = req.params;
     const userId = req.userId!;
 
-    // Hop 1: org ownership
     const orgResult = await verifyOrgOwnership(orgId, userId);
     if ("error" in orgResult) {
       res.status(orgResult.error.status).json({ message: orgResult.error.message });
       return;
     }
 
-    // Hop 2: project belongs to this org
-   const project = await projectRepository.findById(projectId);
+    const project = await projectRepository.findById(projectId);
     if (!project) {
       res.status(404).json({ message: "Project not found" });
       return;
@@ -42,8 +38,7 @@ export const checkRequirementAccess = async (
       return;
     }
 
-    // Hop 3: requirement belongs to this project
-   const requirement = await requirementRepository.findById(requirementId);
+    const requirement = await requirementRepository.findById(requirementId);
     if (!requirement) {
       res.status(404).json({ message: "Requirement not found" });
       return;
@@ -57,8 +52,8 @@ export const checkRequirementAccess = async (
     req.project = project;
     req.requirement = requirement;
     next();
-  } catch (error) {
-    console.error("checkRequirementAccess error:", error);
+  } catch (error: any) {
+    logger.error("checkRequirementAccess failed", { error: error.message, stack: error.stack, orgId, projectId, requirementId });
     res.status(500).json({ message: "Server error checking requirement access" });
   }
 };

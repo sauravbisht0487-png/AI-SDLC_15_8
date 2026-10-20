@@ -1,4 +1,6 @@
 import express from "express";
+import logger from "./utils/logger";
+   import { errorHandler } from "./middlewares/errorHandler";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -45,6 +47,7 @@ app.get("/", (req, res) => {
 
 const startServer = async () => {
   await connectDB();
+     
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
@@ -54,6 +57,9 @@ app.use((req, res) => {
   console.log(`UNMATCHED REQUEST: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ message: "No route matched (custom catch-all)" });
 });
+
+
+   app.use(errorHandler);
 
 
 

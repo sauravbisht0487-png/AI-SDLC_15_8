@@ -2,8 +2,9 @@ import { Request, Response } from "express";
 import * as organizationService from "../services/organizationService";
 import * as projectService from "../services/projectService";
 import { ParamsDictionary } from "express-serve-static-core";
+import logger from "../utils/logger";
 
-interface OrgParams extends  ParamsDictionary {
+interface OrgParams extends ParamsDictionary {
   orgId: string;
 }
 
@@ -20,7 +21,8 @@ export const createOrganization = async (req: Request, res: Response) => {
     }
     const org = await organizationService.createOrganization(name, req.userId!);
     res.status(201).json(org);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to create organization", { error: error.message, stack: error.stack, userId: req.userId });
     res.status(500).json({ message: "Failed to create organization" });
   }
 };
@@ -29,16 +31,16 @@ export const listOrganizations = async (req: Request, res: Response) => {
   try {
     const orgs = await organizationService.getUserOrganizations(req.userId!);
     res.status(200).json(orgs);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to fetch organizations", { error: error.message, stack: error.stack, userId: req.userId });
     res.status(500).json({ message: "Failed to fetch organizations" });
   }
 };
 
-// Note: Request<OrgParams> — this is what fixes the error
 export const createProject = async (req: Request<OrgParams>, res: Response) => {
   try {
     const { name, description } = req.body;
-    const { orgId } = req.params; // now guaranteed to be `string`, not `string | string[]`
+    const { orgId } = req.params;
     const userId = req.userId!;
 
     if (typeof name !== "string" || !name.trim()) {
@@ -53,7 +55,8 @@ export const createProject = async (req: Request<OrgParams>, res: Response) => {
       userId
     );
     res.status(201).json(project);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to create project", { error: error.message, stack: error.stack, orgId: req.params.orgId });
     res.status(500).json({ message: "Failed to create project" });
   }
 };
@@ -63,10 +66,12 @@ export const listProjects = async (req: Request<OrgParams>, res: Response) => {
     const { orgId } = req.params;
     const projects = await projectService.getProjectsForOrg(orgId);
     res.status(200).json(projects);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to fetch projects", { error: error.message, stack: error.stack, orgId: req.params.orgId });
     res.status(500).json({ message: "Failed to fetch projects" });
   }
 };
+
 export const updateOrganization = async (req: Request<OrgParams>, res: Response) => {
   try {
     const { orgId } = req.params;
@@ -86,7 +91,8 @@ export const updateOrganization = async (req: Request<OrgParams>, res: Response)
       return;
     }
     res.status(200).json(updated);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to update organization", { error: error.message, stack: error.stack, orgId: req.params.orgId });
     res.status(500).json({ message: "Failed to update organization" });
   }
 };
@@ -100,7 +106,8 @@ export const deleteOrganization = async (req: Request<OrgParams>, res: Response)
       return;
     }
     res.status(200).json({ message: "Organization deleted", organization: deleted });
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to delete organization", { error: error.message, stack: error.stack, orgId: req.params.orgId });
     res.status(500).json({ message: "Failed to delete organization" });
   }
 };
@@ -108,7 +115,7 @@ export const deleteOrganization = async (req: Request<OrgParams>, res: Response)
 export const createGithubRepo = async (req: Request<OrgProjectParams>, res: Response) => {
   try {
     const { projectId } = req.params;
-    const project = req.project; // attached by checkProjectAccess
+    const project = req.project;
 
     if (!project) {
       res.status(500).json({ message: "Project not found on request" });
@@ -121,11 +128,12 @@ export const createGithubRepo = async (req: Request<OrgProjectParams>, res: Resp
 
     const updated = await projectService.createGithubRepoForProject(projectId, project.name);
     res.status(201).json(updated);
-  } catch (error) {
-    console.error("createGithubRepo error:", error);
+  } catch (error: any) {
+    logger.error("Failed to create GitHub repo", { error: error.message, stack: error.stack, projectId: req.params.projectId });
     res.status(500).json({ message: "Failed to create GitHub repo" });
   }
 };
+
 export const updateProject = async (req: Request<OrgProjectParams>, res: Response) => {
   try {
     const { projectId } = req.params;
@@ -146,7 +154,8 @@ export const updateProject = async (req: Request<OrgProjectParams>, res: Respons
       return;
     }
     res.status(200).json(updated);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to update project", { error: error.message, stack: error.stack, projectId: req.params.projectId });
     res.status(500).json({ message: "Failed to update project" });
   }
 };
@@ -160,7 +169,8 @@ export const deleteProject = async (req: Request<OrgProjectParams>, res: Respons
       return;
     }
     res.status(200).json({ message: "Project deleted", project: deleted });
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to delete project", { error: error.message, stack: error.stack, projectId: req.params.projectId });
     res.status(500).json({ message: "Failed to delete project" });
   }
 };

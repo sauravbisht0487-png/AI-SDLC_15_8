@@ -5,14 +5,14 @@ export interface IUser extends Document {
   email: string;
   password: string;
   createdAt: Date;
-}
+}   
 
 const userSchema = new Schema<IUser>({
   name: {
     type: String,
-    required: true,
-    trim: true,
-  },
+    required: true,//it says the name field is mandatory
+    trim: true,//
+  },//remove the extra space from begning and end 
   email: {
     type: String,
     required: true,
@@ -30,3 +30,5 @@ const userSchema = new Schema<IUser>({
 const User = mongoose.model<IUser>("User", userSchema);//"Create a model called User ....using userSchema."
 // "This Mongoose model represents a User having the structure defined by IUser."
 export default User;
+
+// schema define the rule only.....it give  a way to work with that data  ...model is like the interface between your backend and mpongodb

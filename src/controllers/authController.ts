@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { signupUser, loginUser } from "../services/authService";
+import logger from "../utils/logger";
 
 export const signup = async (req: Request, res: Response) => {
   try {
@@ -17,11 +18,15 @@ export const signup = async (req: Request, res: Response) => {
       token,
     });
   } catch (error: any) {
+      
+
+    logger.error("Signup failed", { error: error.message, stack: error.stack });
     res.status(400).json({ message: error.message });
   }
 };
 
 export const login = async (req: Request, res: Response) => {
+   
   try {
     const { email, password } = req.body;
 
@@ -37,6 +42,7 @@ export const login = async (req: Request, res: Response) => {
       token,
     });
   } catch (error: any) {
+    logger.error("Login failed", { error: error.message, stack: error.stack });
     res.status(401).json({ message: error.message });
   }
 };

@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { ParamsDictionary } from "express-serve-static-core";
 import * as userStoryService from "../services/userStoryService";
 import * as projectRepository from "../repositories/projectRepository";
+import logger from "../utils/logger";
+import { sendAIError } from "../utils/aiErrorResponse";
 
 interface FullChainParams extends ParamsDictionary {
   orgId: string;
@@ -39,7 +41,8 @@ export const createUserStory = async (
       userId,
     );
     res.status(201).json(userStory);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to create user story", { error: error.message, stack: error.stack, requirementId: req.params.requirementId });
     res.status(500).json({ message: "Failed to create user story" });
   }
 };
@@ -53,10 +56,12 @@ export const listUserStories = async (
     const userStories =
       await userStoryService.getUserStoriesForRequirement(requirementId);
     res.status(200).json(userStories);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to fetch user stories", { error: error.message, stack: error.stack, requirementId: req.params.requirementId });
     res.status(500).json({ message: "Failed to fetch user stories" });
   }
 };
+
 interface UserStoryParams extends ParamsDictionary {
   orgId: string;
   projectId: string;
@@ -97,7 +102,8 @@ export const updateUserStory = async (
       return;
     }
     res.status(200).json(updated);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to update user story", { error: error.message, stack: error.stack, userStoryId: req.params.userStoryId });
     res.status(500).json({ message: "Failed to update user story" });
   }
 };
@@ -114,22 +120,18 @@ export const deleteUserStory = async (
       return;
     }
     res.status(200).json({ message: "User story deleted", userStory: deleted });
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to delete user story", { error: error.message, stack: error.stack, userStoryId: req.params.userStoryId });
     res.status(500).json({ message: "Failed to delete user story" });
   }
 };
-
 export const generateCode = async (
   req: Request<UserStoryParams>,
   res: Response,
 ) => {
+  const { userStoryId, requirementId } = req.params;
+  const userId = req.userId!;
   try {
-    const { userStoryId, requirementId } = req.params;
-    const userId = req.userId!;
-
-    // checkRequirementAccess already verified org -> project -> requirement ownership
-    // and attached req.project / req.requirement. We still need to confirm THIS
-    // userStoryId actually belongs to that requirement, not just that it exists.
     const story = await userStoryService.getUserStoryById(userStoryId);
     if (!story || story.requirement.toString() !== requirementId) {
       res.status(404).json({ message: "User story not found" });
@@ -148,23 +150,16 @@ export const generateCode = async (
 
     res.status(201).json(generated);
   } catch (error: any) {
-    console.error("generateCode error:", error);
-
-    switch (error?.code) {
-      case "AI_NOT_CONFIGURED":
-        res.status(500).json({ message: error.message });
-        return;
-      case "AI_RATE_LIMIT":
-        res.status(429).json({ message: error.message });
-        return;
-      case "AI_REQUEST_FAILED":
-      case "AI_EMPTY_RESPONSE":
-      case "AI_INVALID_SHAPE":
-        res.status(502).json({ message: error.message });
-        return;
-      default:
-        res.status(500).json({ message: "Failed to generate code" });
-    }
+    logger.error("Failed to generate code", {
+      error: error.message,
+      stack: error.stack,
+      userStoryId,
+      requirementId,
+      userId,
+      code: error?.code,
+    });
+    if (sendAIError(res, error)) return;
+    res.status(500).json({ message: "Failed to generate code" });
   }
 };
 
@@ -190,8 +185,8 @@ export const pushToGithub = async (req: Request<UserStoryParams>, res: Response)
     );
 
     res.status(200).json({ message: "Code pushed to GitHub successfully", generatedCode: result });
-  } catch (error) {
-    console.error("pushToGithub error:", error);
+  } catch (error: any) {
+    logger.error("Failed to push code to GitHub", { error: error.message, stack: error.stack, projectId: req.params.projectId });
     res.status(500).json({ message: "Failed to push code to GitHub" });
   }
 };

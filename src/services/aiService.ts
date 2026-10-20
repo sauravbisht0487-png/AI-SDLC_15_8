@@ -1,4 +1,15 @@
-import { GoogleGenAI, Type } from "@google/genai";
+
+import { getAIProvider } from "../ai/aiFactory";
+import { aiError } from "../ai/errors";
+import type { JsonSchema } from "../ai/AIProvider";
+
+import { validateGeneratedFiles } from "../ai/validateFiles";
+
+import { designJsonSchema, parseDesign } from "../ai/designSchema";
+import type { IDesign } from "../models/Architecture";
+
+// Re-exported so existing imports of AIServiceError keep working.
+export { AIServiceError } from "../ai/errors";
 
 interface GeneratedStory {
   title: string;
@@ -19,45 +30,59 @@ interface RequirementContext {
   description: string;
 }
 
-// Typed errors so the controller can map them to the right HTTP status
-// instead of everything collapsing into a bare 500.
-export class AIServiceError extends Error {
-  code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.code = code;
-  }
-}
-const aiError = (code: string, message: string) =>
-  new AIServiceError(code, message);
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 
-const responseSchema = {
-  type: Type.ARRAY,
-  items: {
-    type: Type.OBJECT,
-    properties: {
-      title: { type: Type.STRING },
-      description: { type: Type.STRING },
-      acceptanceCriteria: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING },
+// Root must be an object (required by strict JSON-schema mode on most providers),
+// so the arrays are wrapped: { stories: [...] } and { files: [...] }.
+const storiesSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    stories: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          acceptanceCriteria: { type: "array", items: { type: "string" } },
+        },
+        required: ["title", "description", "acceptanceCriteria"],
+        additionalProperties: false,
       },
     },
-    required: ["title", "description", "acceptanceCriteria"],
   },
+  required: ["stories"],
+  additionalProperties: false,
+};
+
+const codeSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    files: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          filename: { type: "string" },
+          language: { type: "string" },
+          code: { type: "string" },
+        },
+        required: ["filename", "language", "code"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["files"],
+  additionalProperties: false,
 };
 
 export const generateUserStories = async (
   requirementTitle: string,
   requirementDescription: string,
 ): Promise<GeneratedStory[]> => {
-  const apiKey = process.env.GEMINI_API_KEY; // read inside function — same rule as JWT_SECRET
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-
   const prompt = `You are a senior business analyst. Given a software requirement, break it down into 2-4 clear user stories.
 
 Requirement title: ${requirementTitle}
@@ -65,76 +90,88 @@ Requirement description: ${requirementDescription}
 
 Each user story should follow the format "As a [user type], I want [goal]" for the title, "So that [benefit]" for the description, and include 2-4 acceptance criteria.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema,
-    },
+  const raw = await getAIProvider().generateJson({
+    prompt,
+    schemaName: "user_stories",
+    schema: storiesSchema,
   });
 
-  if (!response.text) {
-    throw new Error("No text response from AI model");
-  }
-
-  return parseGeneratedStories(response.text);
+  return parseGeneratedStories(raw);
 };
 
-const parseGeneratedStories = (rawText: string): GeneratedStory[] => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    throw new Error("AI response was not valid JSON");
+const parseGeneratedStories = (raw: unknown): GeneratedStory[] => {
+  const root = asRecord(raw);
+  const items = root ? root["stories"] : undefined;
+  if (!Array.isArray(items)) {
+    throw aiError(
+      "AI_INVALID_SHAPE",
+      "AI response did not contain a 'stories' array",
+    );
   }
 
-  if (!Array.isArray(parsed)) {
-    throw new Error("AI response was not a JSON array");
-  }
-
-  return parsed.map((item, index) => {
-    if (
-      typeof item !== "object" ||
-      item === null ||
-      typeof (item as any).title !== "string" ||
-      typeof (item as any).description !== "string" ||
-      !Array.isArray((item as any).acceptanceCriteria)
-    ) {
-      throw new Error(`AI response item at index ${index} has invalid shape`);
+  return items.map((item, index) => {
+    const story = asRecord(item);
+    if (!story) {
+      throw aiError(
+        "AI_INVALID_SHAPE",
+        `AI response item at index ${index} has invalid shape`,
+      );
     }
-    return item as GeneratedStory;
+    const { title, description, acceptanceCriteria } = story;
+    if (
+      typeof title !== "string" ||
+      typeof description !== "string" ||
+      !Array.isArray(acceptanceCriteria) ||
+      !acceptanceCriteria.every((c) => typeof c === "string")
+    ) {
+      throw aiError(
+        "AI_INVALID_SHAPE",
+        `AI response item at index ${index} has invalid shape`,
+      );
+    }
+    return {
+      title,
+      description,
+      acceptanceCriteria: acceptanceCriteria as string[],
+    };
   });
 };
+// Compact text version of the design: cheaper on tokens than raw JSON.
+const formatDesign = (design: IDesign): string => {
+  const entities = design.entities
+    .map((e) => {
+      const fields = e.fields.map((f) => `${f.name}: ${f.type}${f.required ? "" : "?"}`).join(", ");
+      const rels = e.relationships.map((r) => `${r.type} -> ${r.target}`).join(", ");
+      return `- ${e.name} { ${fields} }${rels ? ` | relations: ${rels}` : ""}`;
+    })
+    .join("\n");
 
-const codeResponseSchema = {
-  type: Type.ARRAY,
-  items: {
-    type: Type.OBJECT,
-    properties: {
-      filename: { type: Type.STRING },
-      language: { type: Type.STRING },
-      code: { type: Type.STRING },
-    },
-    required: ["filename", "language", "code"],
-  },
+  const endpoints = design.apiEndpoints
+    .map((a) => `- ${a.method} ${a.path}${a.authRequired ? " (auth required)" : ""}: ${a.description}`)
+    .join("\n");
+
+  const tech = design.techChoices.map((t) => `- ${t.area}: ${t.choice}`).join("\n");
+  const flow = design.dataFlow.map((s, i) => `${i + 1}. ${s}`).join("\n");
+
+  return [
+    `Summary: ${design.summary}`,
+    `Entities:\n${entities || "(none)"}`,
+    `API endpoints:\n${endpoints || "(none)"}`,
+    `Tech choices:\n${tech || "(none)"}`,
+    `Data flow:\n${flow || "(none)"}`,
+  ]
+    .join("\n\n")
+    .slice(0, 8000);
 };
-
 export const generateCodeForStory = async (
   storyTitle: string,
   storyDescription: string,
   acceptanceCriteria: string[],
   project: ProjectContext,
   requirement: RequirementContext,
+  design?: IDesign | undefined,
 ): Promise<GeneratedFile[]> => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw aiError("AI_NOT_CONFIGURED", "GEMINI_API_KEY is not configured");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-
-  const prompt = `You are a senior full-stack engineer working on a Node.js + Express + TypeScript + MongoDB backend, with a React + TypeScript + Vite + Tailwind frontend (MERN stack).
+  const prompt = `You are a senior full-stack engineer working on a Node.js + Express + TypeScript + MongoDB backend, with a React + TypeScript + Vite + Tailwind frontend (MERN stack). Every file path must be relative and start with "backend/" or "frontend/" (for example "backend/src/models/Order.ts" or "frontend/src/pages/Orders.tsx"). Never create or modify package.json, .env files or anything under .github.
 
 Project: ${project.name}
 ${project.description ? `Project description: ${project.description}` : ""}
@@ -146,67 +183,97 @@ User story title: ${storyTitle}
 Description: ${storyDescription}
 Acceptance criteria:
 ${acceptanceCriteria.map((c) => `- ${c}`).join("\n")}
-
+${
+  design
+    ? `System design for this requirement. Stay consistent with it: use these exact entity names, field names and API paths, and implement only the parts this user story needs.\n${formatDesign(design)}\n`
+    : ""
+}
 Decide for yourself which files are actually needed to implement ONLY this user story - it could be a backend model/controller/route/service file, a frontend page/component/API call file, or a mix. Do not generate unrelated features, and do not generate more than 6 files. Keep each file minimal and focused, with brief inline comments explaining key steps. Do not include imports for packages that don't exist in a standard MERN + TypeScript + Tailwind setup.`;
 
-  let response;
-  try {
-    response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: codeResponseSchema,
-      },
-    });
-  } catch (err: any) {
+  const raw = await getAIProvider().generateJson({
+    prompt,
+    schemaName: "generated_files",
+    schema: codeSchema,
+  });
 
-     console.error("RAW GEMINI ERROR:", err);
-    
-    if (err?.status === 429) {
-      throw aiError(
-        "AI_RATE_LIMIT",
-        "Gemini API rate limit reached, please try again shortly",
-      );
-    }
-    throw aiError("AI_REQUEST_FAILED", "Failed to reach the Gemini API");
-  }
-
-  if (!response.text) {
-    throw aiError("AI_EMPTY_RESPONSE", "No text response from AI model");
-  }
-
-  return parseGeneratedFiles(response.text);
+  return validateGeneratedFiles(parseGeneratedFiles(raw));
 };
 
-const parseGeneratedFiles = (rawText: string): GeneratedFile[] => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    throw aiError("AI_INVALID_SHAPE", "AI response was not valid JSON");
+const parseGeneratedFiles = (raw: unknown): GeneratedFile[] => {
+  const root = asRecord(raw);
+  const items = root ? root["files"] : undefined;
+  if (!Array.isArray(items)) {
+    throw aiError(
+      "AI_INVALID_SHAPE",
+      "AI response did not contain a 'files' array",
+    );
   }
-  if (!Array.isArray(parsed)) {
-    throw aiError("AI_INVALID_SHAPE", "AI response was not a JSON array");
-  }
-  if (parsed.length === 0) {
+  if (items.length === 0) {
     throw aiError("AI_EMPTY_RESPONSE", "AI did not return any files");
   }
-  return parsed.map((item, index) => {
+
+  return items.map((item, index) => {
+    const file = asRecord(item);
+    const { filename, language, code } = file ?? {};
+    // Validate required file metadata and reject empty source content.
     if (
-      typeof item !== "object" ||
-      item === null ||
-      typeof (item as any).filename !== "string" ||
-      !(item as any).filename.trim() ||
-      typeof (item as any).language !== "string" ||
-      typeof (item as any).code !== "string" ||
-      !(item as any).code.trim()
+      typeof filename !== "string" ||
+      !filename.trim() ||
+      typeof language !== "string" ||
+      typeof code !== "string" ||
+      !code.trim()
     ) {
       throw aiError(
         "AI_INVALID_SHAPE",
         `AI response item at index ${index} has invalid shape`,
       );
     }
-    return item as GeneratedFile;
+    return { filename, language, code };
   });
+};
+export const generateArchitectureDesign = async (
+  project: ProjectContext,
+  requirement: RequirementContext,
+  stories: { title: string; description: string; acceptanceCriteria: string[] }[],
+): Promise<{ design: IDesign; provider: string; model: string }> => {
+  const provider = getAIProvider();
+
+  const storyText = stories.length
+    ? stories
+        .map(
+          (s, i) =>
+            `${i + 1}. ${s.title}\n   ${s.description}\n   Acceptance criteria: ${s.acceptanceCriteria.join("; ")}`,
+        )
+        .join("\n")
+    : "(no user stories yet; design from the requirement alone)";
+
+  const prompt = `You are a senior software architect. Produce a practical system design for the requirement below.
+
+Project: ${project.name}
+${project.description ? `Project description: ${project.description}` : ""}
+
+Requirement: ${requirement.title}
+${requirement.description}
+
+User stories:
+${storyText}
+
+Constraints:
+- Stack is fixed: React + TypeScript + Vite + Tailwind frontend; Node.js + Express + TypeScript backend; MongoDB + Mongoose. Do not propose other stacks.
+- Backend layering is Route -> Middleware -> Controller -> Service -> Repository -> Model.
+- Keep it proportionate to the requirement: at most 8 components, 10 entities, 25 API endpoints. No microservices unless clearly needed.
+- component.type must be one of: frontend, backend, database, external, queue, cache, other.
+- entity.fields: list business fields only (skip _id, createdAt, updatedAt). field.type is a simple type such as string, number, boolean, Date, ObjectId.
+- relationship.type must be one of: one-to-one, one-to-many, many-to-many; relationship.target is another entity's name.
+- apiEndpoints.method must be one of: GET, POST, PUT, PATCH, DELETE. Paths start with "/api/". requestBody and responseBody are short one-line shape descriptions ("" if none).
+- dataFlow is an ordered list of short steps describing the main request flow.
+- Use "" for any text field with nothing to say.`;
+
+  const raw = await provider.generateJson({
+    prompt,
+    schemaName: "architecture_design",
+    schema: designJsonSchema,
+  });
+
+  return { design: parseDesign(raw), provider: provider.name, model: provider.model };
 };

@@ -3,6 +3,8 @@ import { ParamsDictionary } from "express-serve-static-core";
 import * as requirementService from "../services/requirementService";
 import * as aiService from "../services/aiService";
 import * as userStoryService from "../services/userStoryService";
+import logger from "../utils/logger";
+import { sendAIError } from "../utils/aiErrorResponse";
 
 interface OrgProjectParams extends ParamsDictionary {
   orgId: string;
@@ -39,7 +41,8 @@ export const createRequirement = async (
       userId
     );
     res.status(201).json(requirement);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to create requirement", { error: error.message, stack: error.stack, projectId: req.params.projectId });
     res.status(500).json({ message: "Failed to create requirement" });
   }
 };
@@ -52,12 +55,11 @@ export const listRequirements = async (
     const { projectId } = req.params;
     const requirements = await requirementService.getRequirementsForProject(projectId);
     res.status(200).json(requirements);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to fetch requirements", { error: error.message, stack: error.stack, projectId: req.params.projectId });
     res.status(500).json({ message: "Failed to fetch requirements" });
   }
 };
-
-
 
 export const updateRequirement = async (req: Request<FullChainParams>, res: Response) => {
   try {
@@ -67,7 +69,7 @@ export const updateRequirement = async (req: Request<FullChainParams>, res: Resp
     const updates: { title?: string; description?: string; status?: "draft" | "approved" | "in_progress" | "done" } = {};
     if (typeof title === "string" && title.trim()) updates.title = title.trim();
     if (typeof description === "string" && description.trim()) updates.description = description.trim();
-    if (typeof status === "string") updates.status = status as any; // validated by Mongoose enum + runValidators
+    if (typeof status === "string") updates.status = status as any;
 
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ message: "No valid fields provided to update" });
@@ -80,7 +82,8 @@ export const updateRequirement = async (req: Request<FullChainParams>, res: Resp
       return;
     }
     res.status(200).json(updated);
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to update requirement", { error: error.message, stack: error.stack, requirementId: req.params.requirementId });
     res.status(500).json({ message: "Failed to update requirement" });
   }
 };
@@ -94,18 +97,20 @@ export const deleteRequirement = async (req: Request<FullChainParams>, res: Resp
       return;
     }
     res.status(200).json({ message: "Requirement deleted", requirement: deleted });
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Failed to delete requirement", { error: error.message, stack: error.stack, requirementId: req.params.requirementId });
     res.status(500).json({ message: "Failed to delete requirement" });
   }
 };
 
 export const generateStories = async (req: Request<FullChainParams>, res: Response) => {
+  const userId = req.userId!;
+
   try {
-    const userId = req.userId!;
-    const requirement = req.requirement; // attached by checkRequirementAccess
+    const requirement = req.requirement;
 
     if (!requirement) {
-      // defensive — should never happen if middleware ran correctly
+      logger.error("Requirement not found on request (middleware issue)", { requirementId: req.params.requirementId });
       res.status(500).json({ message: "Requirement not found on request" });
       return;
     }
@@ -131,8 +136,15 @@ export const generateStories = async (req: Request<FullChainParams>, res: Respon
       message: `Generated ${created.length} user stories`,
       userStories: created,
     });
-  } catch (error) {
-    console.error("generateStories error:", error);
+    } catch (error: any) {
+    logger.error("Failed to generate user stories", {
+      error: error.message,
+      stack: error.stack,
+      requirementId: req.params.requirementId,
+      userId,
+      code: error?.code,
+    });
+    if (sendAIError(res, error)) return;
     res.status(500).json({ message: "Failed to generate user stories" });
   }
 };
