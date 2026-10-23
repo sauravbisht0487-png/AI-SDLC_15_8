@@ -74,6 +74,8 @@ Rules:
 - Test controllers and services with mocked req and res objects (res.status and res.json as vi.fn()).
 - Cover the acceptance criteria: the success path, validation errors and not-found or error cases.
 - Test only behaviour that exists in the source files. Do not invent functions or files.
+- Assert exact values ONLY when the acceptance criteria state them or they follow directly from the input (for example the sorted array for a given input).
+- NEVER assert exact values for anything the acceptance criteria do not define, such as iteration or step counts, timings, ids or generated text. Assert the type or shape instead, for example: expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ sortedArray: [1, 2, 3], iterations: expect.any(Number) })).
 - No package installs, no file system access, no environment variables, no process.exit.`;
 
   const provider = getAIProvider();

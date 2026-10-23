@@ -4,15 +4,11 @@ import * as requirementRepository from "../repositories/requirementRepository";
 import * as userStoryService from "./userStoryService";
 import * as architectureService from "./architectureService";
 import * as testService from "./testService";
+import { runTestsWithSelfHealing } from "./healingService";
+import { SandboxError } from "./sandboxRunner";
 import { AIServiceError } from "../ai/errors";
 import type { IStage, StageName } from "../models/SDLCWorkflow";
 import logger from "../utils/logger";
-
-import * as generatedCodeRepository from "../repositories/generatedCodeRepository";
-import * as testSuiteRepository from "../repositories/testSuiteRepository";
-import * as testRunRepository from "../repositories/testRunRepository";
-import { runTestsInSandbox, SandboxError } from "./sandboxRunner";
-import { parseVitestResult } from "./vitestParser";
 
 const MAX_STAGE_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 5000;
@@ -37,10 +33,11 @@ const errorCode = (err: unknown): string | undefined =>
 
 // What the user sees. Unknown errors are logged in full but not exposed.
 const safeMessage = (err: unknown): string => {
-   if (err instanceof AIServiceError || err instanceof StageError || err instanceof SandboxError) {
+  if (err instanceof AIServiceError || err instanceof StageError || err instanceof SandboxError) {
     return err.message;
   }
   if (err instanceof Error && errorCode(err) === "NO_BACKEND_FILES") return err.message;
+  if (err instanceof Error && errorCode(err) === "MISSING_INPUT") return err.message;
   return "Unexpected error. Check the server logs.";
 };
 
@@ -67,12 +64,13 @@ const executeStage = async (
       return output;
     } catch (err: unknown) {
       const code = errorCode(err);
-      logger.error("Stage attempt failed", {
+           logger.error("Stage attempt failed", {
         workflowId,
         stage,
         attempt,
         code,
         error: err instanceof Error ? err.message : String(err),
+        detail: err instanceof SandboxError ? err.detail : undefined,
       });
 
       if (attempt < MAX_STAGE_ATTEMPTS && code !== undefined && RETRYABLE_CODES.has(code)) {
@@ -122,7 +120,7 @@ export const runWorkflow = async (workflowId: string): Promise<void> => {
   if (!design) return;
 
   // ---- CODE_GENERATION ----
-  const code = await executeStage(
+  const codeOutput = await executeStage(
     workflowId,
     "CODE_GENERATION",
     stageOf("CODE_GENERATION"),
@@ -136,15 +134,15 @@ export const runWorkflow = async (workflowId: string): Promise<void> => {
       return { generatedCodeId: generated._id.toString() };
     },
   );
-  if (!code) return;
+  if (!codeOutput) return;
 
   // ---- TEST_GENERATION ----
-  const tests = await executeStage(
+  const testsOutput = await executeStage(
     workflowId,
     "TEST_GENERATION",
     stageOf("TEST_GENERATION"),
     async () => {
-      const generatedCodeId = code["generatedCodeId"];
+      const generatedCodeId = codeOutput["generatedCodeId"];
       if (!generatedCodeId) {
         throw new StageError("MISSING_INPUT", "Code generation produced no generated code id");
       }
@@ -160,72 +158,51 @@ export const runWorkflow = async (workflowId: string): Promise<void> => {
       return { testSuiteId: suite._id.toString() };
     },
   );
-  if (!tests) return;
+  if (!testsOutput) return;
 
-  // TEST_EXECUTION needs the Docker sandbox (Task 10). Skipped until then.
-    // ---- TEST_EXECUTION: run the generated tests inside the Docker sandbox ----
+  // ---- TEST_EXECUTION: run the tests in the sandbox, with bounded self-healing ----
   const execution = await executeStage(
     workflowId,
     "TEST_EXECUTION",
     stageOf("TEST_EXECUTION"),
     async () => {
-      const generatedCodeId = code["generatedCodeId"];
-      const testSuiteId = tests["testSuiteId"];
+      const generatedCodeId = codeOutput["generatedCodeId"];
+      const testSuiteId = testsOutput["testSuiteId"];
       if (!generatedCodeId || !testSuiteId) {
         throw new StageError("MISSING_INPUT", "Earlier stages produced no code or tests to run");
       }
 
-      const [generatedCode, suite] = await Promise.all([
-        generatedCodeRepository.findById(generatedCodeId),
-        testSuiteRepository.findById(testSuiteId),
-      ]);
-      if (!generatedCode || !suite) {
-        throw new StageError("MISSING_INPUT", "The generated code or test suite no longer exists");
-      }
-
-      const files = [
-        ...generatedCode.files
-          .filter((f) => f.filename.startsWith("backend/"))
-          .map((f) => ({ path: f.filename, content: f.code })),
-        ...suite.files.map((f) => ({ path: f.filename, content: f.code })),
-      ];
-
-      const raw = await runTestsInSandbox(files);
-      const parsed = parseVitestResult(raw);
-
-      // Saved BEFORE deciding pass or fail, so failures are always inspectable.
-      const run = await testRunRepository.create({
-        testSuiteId,
-        generatedCodeId,
+      const result = await runTestsWithSelfHealing({
         workflowId,
-        attempt: 1,
-        status: parsed.status,
-        totalTests: parsed.totalTests,
-        passedTests: parsed.passedTests,
-        failedTests: parsed.failedTests,
-        durationMs: raw.durationMs,
-        exitCode: raw.exitCode,
-        failures: parsed.failures,
-        output: parsed.output,
-        error: parsed.error,
+        userStoryId,
+        storyTitle: story.title,
+        acceptanceCriteria: story.acceptanceCriteria,
+        generatedCodeId,
+        testSuiteId,
         createdBy,
       });
 
-      if (parsed.status === "passed") return { testRunId: run._id.toString() };
+      if (result.status === "passed") {
+        return {
+          testRunId: result.testRunId,
+          generatedCodeId: result.generatedCodeId,
+          testSuiteId: result.testSuiteId,
+          attempts: String(result.attempts),
+        };
+      }
 
-      const firstFailure = parsed.failures[0];
-      const summary =
-        parsed.status === "failed"
-          ? `${parsed.failedTests} of ${parsed.totalTests} tests failed`
-          : parsed.status === "timeout"
-            ? "Tests exceeded the time limit and were stopped"
-            : `Tests could not run: ${firstFailure?.message ?? "see the test run for details"}`;
-      throw new StageError(`TESTS_${parsed.status.toUpperCase()}`, summary);
+      // Not fixed. The code tells the user whether healing was even attempted.
+      const failureCode =
+        result.status === "timeout" || result.repairs.length === 0
+          ? "TESTS_FAILED"
+          : "SELF_HEALING_FAILED";
+      const tried =
+        result.repairs.length > 0 ? ` What the AI tried: ${result.repairs.join(" | ")}` : "";
+      throw new StageError(failureCode, `${result.summary}.${tried}`.slice(0, 1800));
     },
   );
   if (!execution) return;
 
   await workflowService.completeWorkflow(workflowId);
-  
   logger.info("Workflow completed", { workflowId });
 };

@@ -151,7 +151,7 @@ export const runTestsInSandbox = async (
           "Sandbox image not found. Build it with: docker build -t ai-sdlc-sandbox sandbox",
         );
       }
-      if (/daemon|pipe|connect/i.test(create.stderr)) {
+           if (/Cannot connect to the Docker daemon|error during connect|dockerDesktopLinuxEngine|failed to connect to the docker API/i.test(create.stderr)) {
         throw new SandboxError("SANDBOX_UNAVAILABLE", "Docker is not running", create.stderr);
       }
                const reason = create.timedOut

@@ -5,6 +5,8 @@ import * as projectRepository from "../repositories/projectRepository";
 import logger from "../utils/logger";
 import { sendAIError } from "../utils/aiErrorResponse";
 
+import * as generatedCodeRepository from "../repositories/generatedCodeRepository";
+
 interface FullChainParams extends ParamsDictionary {
   orgId: string;
   projectId: string;
@@ -170,6 +172,12 @@ export const pushToGithub = async (req: Request<UserStoryParams>, res: Response)
 
     if (typeof generatedCodeId !== "string") {
       res.status(400).json({ message: "generatedCodeId is required" });
+      return;
+    }
+
+    const owned = await generatedCodeRepository.findByIdForProject(generatedCodeId, projectId);
+    if (!owned) {
+      res.status(404).json({ message: "Generated code not found" });
       return;
     }
 

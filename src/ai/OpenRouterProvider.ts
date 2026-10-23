@@ -7,6 +7,7 @@ import { aiError } from "./errors";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const REQUEST_TIMEOUT_MS = 90_000;
+const RATE_LIMIT_WAIT_MS = 10_000;
 
 interface OpenRouterResponse {
   choices?: { message?: { content?: string | null } }[];
@@ -22,10 +23,9 @@ export class OpenRouterProvider implements AIProvider {
     this.model = model;
   }
 
-  async generateJson(request: GenerateJsonRequest): Promise<unknown> {
-    let response: Response;
+  private async send(request: GenerateJsonRequest): Promise<Response> {
     try {
-      response = await fetch(OPENROUTER_URL, {
+      return await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
@@ -51,6 +51,17 @@ export class OpenRouterProvider implements AIProvider {
       console.error("RAW OPENROUTER NETWORK ERROR:", err);
       throw aiError("AI_REQUEST_FAILED", "Failed to reach the OpenRouter API");
     }
+  }
+
+  async generateJson(request: GenerateJsonRequest): Promise<unknown> {
+    let response = await this.send(request);
+
+    // One bounded retry on a rate limit: wait, then try again.
+    if (response.status === 429) {
+      console.warn(`OpenRouter rate limit hit, retrying once in ${RATE_LIMIT_WAIT_MS / 1000}s`);
+      await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_WAIT_MS));
+      response = await this.send(request);
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -59,6 +70,12 @@ export class OpenRouterProvider implements AIProvider {
         throw aiError(
           "AI_RATE_LIMIT",
           "OpenRouter rate limit reached, please try again shortly",
+        );
+      }
+      if (response.status === 402) {
+        throw aiError(
+          "AI_REQUEST_FAILED",
+          "OpenRouter credits are too low for this model. Add credits or choose a cheaper AI_MODEL",
         );
       }
       throw aiError(
