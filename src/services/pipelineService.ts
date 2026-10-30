@@ -3,6 +3,10 @@ import * as workflowService from "./sdlcWorkflowService";
 import * as userStoryService from "./userStoryService";
 import { enqueueWorkflow } from "../queue/sdlcQueue";
 import logger from "../utils/logger";
+import mongoose from "mongoose";
+import Architecture from "../models/Architecture";
+import * as generatedCodeRepository from "../repositories/generatedCodeRepository";
+import * as testSuiteRepository from "../repositories/testSuiteRepository";
 
 import * as testRunRepository from "../repositories/testRunRepository";
 
@@ -102,4 +106,60 @@ export const getLatestTestRun = async (
   const workflow = await getWorkflow(requirementId, userStoryId, workflowId);
   if (!workflow) return null;
   return testRunRepository.findLatestByWorkflow(workflowId);
+};
+
+// Null when the workflow isn't under this story, or the run isn't part of that workflow.
+export const getTestRunById = async (
+  requirementId: string,
+  userStoryId: string,
+  workflowId: string,
+  testRunId: string,
+) => {
+  const workflow = await getWorkflow(requirementId, userStoryId, workflowId);
+  if (!workflow) return null;
+  return testRunRepository.findByIdForWorkflow(testRunId, workflowId);
+};
+
+// Design, code and tests of one workflow. Uses the BEST versions when tests ran,
+// otherwise the first generated ones. Null when the workflow isn't under this story.
+export const getWorkflowOutputs = async (
+  requirementId: string,
+  userStoryId: string,
+  workflowId: string,
+) => {
+  const workflow = await getWorkflow(requirementId, userStoryId, workflowId);
+  if (!workflow) return null;
+
+  const out = (name: string): Record<string, string> => {
+    const stage = workflow.stages.find((s) => s.name === name);
+    return (stage?.output ?? {}) as Record<string, string>;
+  };
+  const valid = (id: string | undefined): id is string =>
+    typeof id === "string" && mongoose.isValidObjectId(id);
+
+  const best = out("TEST_EXECUTION");
+  const codeId = best["generatedCodeId"] ?? out("CODE_GENERATION")["generatedCodeId"];
+  const suiteId = best["testSuiteId"] ?? out("TEST_GENERATION")["testSuiteId"];
+  const architectureId = out("DESIGN")["architectureId"];
+
+  const architecture = valid(architectureId)
+    ? await Architecture.findOne({ _id: architectureId, requirement: requirementId })
+    : null;
+  const code = valid(codeId) ? await generatedCodeRepository.findById(codeId) : null;
+  const suite = valid(suiteId) ? await testSuiteRepository.findById(suiteId) : null;
+
+  const plain = (f: { filename: string; language: string; code: string }) => ({
+    filename: f.filename,
+    language: f.language,
+    code: f.code,
+  });
+
+  return {
+    source: best["generatedCodeId"] ? "best" : "generated",
+    architecture: architecture
+      ? { version: architecture.version, design: architecture.design }
+      : null,
+    code: code && code.userStory.toString() === userStoryId ? code.files.map(plain) : [],
+    tests: suite && suite.userStory.toString() === userStoryId ? suite.files.map(plain) : [],
+  };
 };

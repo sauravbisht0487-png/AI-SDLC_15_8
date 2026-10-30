@@ -3,7 +3,8 @@ import { aiError } from "../ai/errors";
 import type { JsonSchema } from "../ai/AIProvider";
 import { normalizePath, validateGeneratedFiles } from "../ai/validateFiles";
 import type { IFailedTest } from "../models/TestRun";
-
+import { fixTestImports } from "./importFixer";
+import { MOCKING_RULES } from "./promptRules";
 export interface RepairFile {
   filename: string;
   code: string;
@@ -166,6 +167,9 @@ ${testsText}
 Related source files:
 ${sourcesText}
 
+All source files that exist (tests may import only these; count the ../ segments from the test file's own folder):
+${input.sourceFiles.map((f) => f.filename).join("\n")}
+
 Rules:
 - Return the COMPLETE new content of every file you change. Never return partial files or diffs.
 - Fix the root cause. If the test asserts an invented value or shape that the acceptance criteria do not require, fix the TEST. If the code is genuinely wrong or incomplete against the acceptance criteria, fix the CODE. Never delete or weaken a test just to make it pass.
@@ -173,7 +177,7 @@ Rules:
 - Do not create or edit package.json, .env files or config files.
 - Only these packages exist in the sandbox: ${SANDBOX_PACKAGES}. Do not import anything else.
 - Tests must not use a real database or network: keep mocking with vi.mock.
-- Set target to "code", "test" or "both" to say what you changed.`;
+- Set target to "code", "test" or "both" to say what you changed.${MOCKING_RULES}`;
 
   const provider = getAIProvider();
   const raw = await provider.generateJson({
@@ -228,19 +232,27 @@ Rules:
       );
     }
   }
+  // Fix wrong relative imports in test files without asking the AI again.
+  const sourcePaths = new Set(input.sourceFiles.map((s) => s.filename));
+  for (const f of files) if (f.filename.startsWith("backend/src/")) sourcePaths.add(f.filename);
+  const fixedFiles = files.map((f) =>
+    f.filename.startsWith("backend/tests/")
+      ? { ...f, code: fixTestImports(f.filename, f.code, [...sourcePaths]) }
+      : f,
+  );
 
   // Keep "target" honest: it must match what was actually changed.
-  const touchesTests = files.some((f) => f.filename.startsWith("backend/tests/"));
-  const touchesSrc = files.some((f) => f.filename.startsWith("backend/src/"));
+  const touchesTests = fixedFiles.some((f) => f.filename.startsWith("backend/tests/"));
+  const touchesSrc = fixedFiles.some((f) => f.filename.startsWith("backend/src/"));
   const actualTarget: ProposedFix["target"] =
     touchesTests && touchesSrc ? "both" : touchesTests ? "test" : "code";
 
   return {
-    fix: { target: actualTarget, explanation: explanation.trim(), files },
+    fix: { target: actualTarget, explanation: explanation.trim(), files: fixedFiles },
     provider: provider.name,
     model: provider.model,
   };
 };
-
+ 
 // Re-exported so 11b can use the same path normalisation when merging files.
 export { normalizePath };

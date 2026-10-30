@@ -5,11 +5,13 @@ import * as pipelineService from "../services/pipelineService";
 import logger from "../utils/logger";
 
 interface PipelineParams extends ParamsDictionary {
+
   orgId: string;
   projectId: string;
   requirementId: string;
   userStoryId: string;
   workflowId: string;
+  testRunId: string;
 }
 
 const STATUS_BY_CODE: Record<string, number> = {
@@ -99,5 +101,43 @@ export const getTestRun = async (req: Request<PipelineParams>, res: Response) =>
   } catch (error: unknown) {
     logger.error("Failed to fetch test run", { error: message(error), workflowId });
     res.status(500).json({ message: "Failed to fetch test run" });
+  }
+};
+
+export const getTestRunByIdHandler = async (req: Request<PipelineParams>, res: Response) => {
+  const { requirementId, userStoryId, workflowId, testRunId } = req.params;
+  if (!mongoose.isValidObjectId(userStoryId) || !mongoose.isValidObjectId(workflowId)) {
+    res.status(404).json({ message: "Test run not found" });
+    return;
+  }
+  try {
+    const run = await pipelineService.getTestRunById(requirementId, userStoryId, workflowId, testRunId);
+    if (!run) {
+      res.status(404).json({ message: "Test run not found" });
+      return;
+    }
+    res.status(200).json(run);
+  } catch (error: unknown) {
+    logger.error("Failed to fetch test run by id", { error: message(error), workflowId, testRunId });
+    res.status(500).json({ message: "Failed to fetch test run" });
+  }
+};
+
+export const getWorkflowOutputsHandler = async (req: Request<PipelineParams>, res: Response) => {
+  const { requirementId, userStoryId, workflowId } = req.params;
+  if (!mongoose.isValidObjectId(userStoryId) || !mongoose.isValidObjectId(workflowId)) {
+    res.status(404).json({ message: "Workflow not found" });
+    return;
+  }
+  try {
+    const outputs = await pipelineService.getWorkflowOutputs(requirementId, userStoryId, workflowId);
+    if (!outputs) {
+      res.status(404).json({ message: "Workflow not found" });
+      return;
+    }
+    res.status(200).json(outputs);
+  } catch (error: unknown) {
+    logger.error("Failed to fetch workflow outputs", { error: message(error), workflowId });
+    res.status(500).json({ message: "Failed to fetch workflow outputs" });
   }
 };

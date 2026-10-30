@@ -2,7 +2,7 @@ import { getAIProvider } from "../ai/aiFactory";
 import { aiError } from "../ai/errors";
 import type { JsonSchema } from "../ai/AIProvider";
 import { validateGeneratedFiles } from "../ai/validateFiles";
-
+import { MOCKING_RULES } from "./promptRules";
 interface SourceFile {
   filename: string;
   code: string;
@@ -76,7 +76,8 @@ Rules:
 - Test only behaviour that exists in the source files. Do not invent functions or files.
 - Assert exact values ONLY when the acceptance criteria state them or they follow directly from the input (for example the sorted array for a given input).
 - NEVER assert exact values for anything the acceptance criteria do not define, such as iteration or step counts, timings, ids or generated text. Assert the type or shape instead, for example: expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ sortedArray: [1, 2, 3], iterations: expect.any(Number) })).
-- No package installs, no file system access, no environment variables, no process.exit.`;
+- No package installs, no file system access, no environment variables, no process.exit.${MOCKING_RULES}`;
+
 
   const provider = getAIProvider();
   const raw = await provider.generateJson({

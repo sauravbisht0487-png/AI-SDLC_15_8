@@ -5,7 +5,14 @@ import { checkRequirementAccess } from "../middlewares/checkRequirementAccess";
 import { generateCode } from "../controllers/userStoryController";
 import { generateTests } from "../controllers/testController.js";
 
-import { runPipeline, listWorkflows, getWorkflow ,  getTestRun } from "../controllers/workflowController";
+import {
+  runPipeline,
+  listWorkflows,
+  getWorkflow,
+  getTestRun,
+  getTestRunByIdHandler,
+  getWorkflowOutputsHandler,
+} from "../controllers/workflowController";
 
 import {
   generateArchitecture,
@@ -71,6 +78,18 @@ router.get(
   authenticate,
   checkRequirementAccess,
   getTestRun,
+);
+router.get(
+  "/:requirementId/userstories/:userStoryId/workflows/:workflowId/test-runs/:testRunId",
+  authenticate,
+  checkRequirementAccess,
+  getTestRunByIdHandler,
+);
+router.get(
+  "/:requirementId/userstories/:userStoryId/workflows/:workflowId/outputs",
+  authenticate,
+  checkRequirementAccess,
+  getWorkflowOutputsHandler,
 );
 
 router.use("/:requirementId/userstories", userStoryRoutes);

@@ -5,6 +5,7 @@ import { proposeFixes, type ProposedFix } from "./repairService";
 import { runTestsInSandbox } from "./sandboxRunner";
 import { parseVitestResult, type ParsedRun } from "./vitestParser";
 import logger from "../utils/logger";
+import { fixTestImports } from "./importFixer";
 
 export const MAX_REPAIR_ATTEMPTS = 3;
 const LOAD_FAILURE_NAME = "(test file failed to load)";
@@ -130,7 +131,11 @@ export const runTestsWithSelfHealing = async (ctx: HealingContext): Promise<Heal
   let attempt = 1;
 
   const firstCode = toFiles(initialCode.files);
-  const firstTests = toFiles(initialSuite.files);
+   const sourcePaths = firstCode.map((f) => f.filename);
+  const firstTests = toFiles(initialSuite.files).map((f) => ({
+    ...f,
+    code: fixTestImports(f.filename, f.code, sourcePaths),
+  }));
   const first = await runAndRecord(ctx, ctx.generatedCodeId, ctx.testSuiteId, firstCode, firstTests, attempt);
 
   // "best" is the best version seen so far. Every repair starts from it.

@@ -1,5 +1,7 @@
 import TestRun, { type IFailedTest, type TestRunStatus } from "../models/TestRun";
 
+import mongoose from "mongoose";
+
 export const create = async (data: {
   testSuiteId: string;
   generatedCodeId: string;
@@ -44,3 +46,8 @@ export const listByTestSuite = async (testSuiteId: string) =>
 
 export const findLatestByWorkflow = async (workflowId: string) =>
   TestRun.findOne({ workflow: workflowId }).sort({ createdAt: -1 });
+
+export const findByIdForWorkflow = async (id: string, workflowId: string) => {
+  if (!mongoose.isValidObjectId(id)) return null;
+  return TestRun.findOne({ _id: id, workflow: workflowId });
+};
